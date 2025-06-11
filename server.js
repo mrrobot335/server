@@ -17,6 +17,7 @@ const io = new Server(server, {
 
 const users = {};             // { userId: socketId }
 const chatHistory = {};       // { userId: [{ from, text }] }
+const adminSockets = new Set();
 
 io.on("connection", (socket) => {
   const userId = socket.handshake.query.userId;
@@ -26,7 +27,8 @@ io.on("connection", (socket) => {
     console.log(`User connected: ${userId}`);
     if (!chatHistory[userId]) chatHistory[userId] = [];
   } else {
-    console.log("Admin or unidentified user connected");
+    console.log("Admin connected");
+    adminSockets.add(socket.id);
   }
 
   socket.on("message", (data) => {
@@ -34,20 +36,30 @@ io.on("connection", (socket) => {
 
     if (!recipient || !text) return;
 
-    // Save message
+    // Save message for recipient
     if (!chatHistory[recipient]) chatHistory[recipient] = [];
     chatHistory[recipient].push({ from: sender, text });
 
+    // Send message to recipient if connected
     const recipientSocketId = users[recipient];
     if (recipientSocketId) {
-      io.to(recipientSocketId).emit("message", { sender, text });
+      io.to(recipientSocketId).emit("message", { sender, recipient, text });
     }
+
+    // Also send message to all admins
+    adminSockets.forEach(adminSocketId => {
+      io.to(adminSocketId).emit("message", { sender, recipient, text });
+    });
   });
 
   socket.on("disconnect", () => {
     if (userId && users[userId] === socket.id) {
       delete users[userId];
       console.log(`User disconnected: ${userId}`);
+    }
+    if (adminSockets.has(socket.id)) {
+      adminSockets.delete(socket.id);
+      console.log("Admin disconnected");
     }
   });
 });
@@ -78,8 +90,13 @@ app.post("/chat/:userId", (req, res) => {
 
   const recipientSocketId = users[userId];
   if (recipientSocketId) {
-    io.to(recipientSocketId).emit("message", { sender: "admin", text });
+    io.to(recipientSocketId).emit("message", { sender: "admin", recipient: userId, text });
   }
+
+  // Also notify all admins of this message (optional, but useful)
+  adminSockets.forEach(adminSocketId => {
+    io.to(adminSocketId).emit("message", { sender: "admin", recipient: userId, text });
+  });
 
   res.json({ success: true });
 });
