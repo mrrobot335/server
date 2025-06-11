@@ -10,7 +10,7 @@
     #sendArea { display: flex; gap: 10px; }
     input { flex: 1; padding: 8px; }
     button { padding: 8px 12px; }
-    .message { margin-bottom: 6px; }
+    button.user-btn { width: 100%; margin-bottom: 5px; }
   </style>
 </head>
 <body>
@@ -26,6 +26,25 @@
   <script src="https://cdn.socket.io/4.5.4/socket.io.min.js"></script>
   <script>
     let selectedUser = null;
+    const socket = io("http://69.62.126.138:3000");
+
+    // Listen for incoming messages from users
+    socket.on("message", (data) => {
+      const { sender, text } = data;
+      console.log("Admin received message:", data);
+
+      if (sender === selectedUser) {
+        addMessageToBox(`👤 User: ${text}`);
+      }
+    });
+
+    function addMessageToBox(msg) {
+      const msgBox = document.getElementById("messages");
+      const div = document.createElement("div");
+      div.textContent = msg;
+      msgBox.appendChild(div);
+      msgBox.scrollTop = msgBox.scrollHeight;
+    }
 
     async function loadUsers() {
       const res = await fetch("/users");
@@ -35,6 +54,7 @@
       users.forEach(u => {
         const btn = document.createElement("button");
         btn.textContent = u;
+        btn.className = "user-btn";
         btn.onclick = () => selectUser(u);
         usersDiv.appendChild(btn);
       });
@@ -47,12 +67,12 @@
       const msgBox = document.getElementById("messages");
       msgBox.innerHTML = "";
       msgs.forEach(msg => {
+        const prefix = msg.from === "admin" ? "🛠️ Admin: " : "👤 User: ";
         const div = document.createElement("div");
-        div.classList.add("message");
-        div.textContent = `${msg.from === "admin" ? "🛠️ Admin: " : "👤 User: "} ${msg.text}`;
+        div.textContent = prefix + msg.text;
         msgBox.appendChild(div);
       });
-      scrollToBottom();
+      msgBox.scrollTop = msgBox.scrollHeight;
     }
 
     async function sendMessage() {
@@ -66,39 +86,12 @@
         body: JSON.stringify({ text }),
       });
 
+      addMessageToBox(`🛠️ Admin: ${text}`);
       input.value = "";
-      selectUser(selectedUser);
     }
 
-    function scrollToBottom() {
-      const msgBox = document.getElementById("messages");
-      msgBox.scrollTop = msgBox.scrollHeight;
-    }
-
-    setInterval(loadUsers, 5000); // Poll user list every 5 seconds
+    setInterval(loadUsers, 5000); // Refresh users every 5 seconds
     loadUsers();
-
-    // ---- Socket.IO client for real-time incoming messages ----
-    const socket = io("http://69.62.126.138:3000");
-
-    socket.on("connect", () => {
-      console.log("Admin connected to socket server");
-    });
-
-    socket.on("message", (data) => {
-      console.log("Received message:", data);
-      const { sender, recipient, text } = data;
-
-      // Only show incoming messages from the selected user
-      if (sender === selectedUser) {
-        const msgBox = document.getElementById("messages");
-        const div = document.createElement("div");
-        div.classList.add("message");
-        div.textContent = `👤 User: ${text}`;
-        msgBox.appendChild(div);
-        scrollToBottom();
-      }
-    });
   </script>
 </body>
 </html>
