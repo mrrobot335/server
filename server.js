@@ -1,75 +1,90 @@
 const express = require("express");
 const http = require("http");
-const socketIo = require("socket.io");
+const { Server } = require("socket.io");
 const cors = require("cors");
 
 const app = express();
+app.use(cors());
+app.use(express.json());
+
 const server = http.createServer(app);
-const io = socketIo(server, {
+const io = new Server(server, {
   cors: {
-    origin: "*", // Allow all origins for testing
-    methods: ["GET", "POST"]
+    origin: "*"
   }
 });
 
-app.use(cors());
-app.use(express.json());
-app.use(express.static("admin"));
+const users = {};             // { userId: socketId }
+const chatHistory = {};       // { userId: [{ from, text }] }
 
-let messages = {}; // { userId: [{from, text}] }
+io.on("connection", (socket) => {
+  const userId = socket.handshake.query.userId;
 
-io.on("connection", socket => {
-  let userId = socket.handshake.query.userId;
-  let isAdmin = socket.handshake.query.admin === "true";
-
-  if (!userId && !isAdmin) {
-    socket.disconnect();
-    return;
-  }
-
-  if (!isAdmin) {
-    console.log(`📱 User connected: ${userId}`);
-    socket.join(userId);
+  if (userId) {
+    users[userId] = socket.id;
+    console.log(`User connected: ${userId}`);
+    if (!chatHistory[userId]) chatHistory[userId] = [];
   } else {
-    console.log(`🛠 Admin connected`);
-    socket.join("admins");
+    console.log("Admin or unidentified user connected");
   }
 
-  // Send existing messages to user
-  if (userId && messages[userId]) {
-    socket.emit("chatHistory", messages[userId]);
-  }
+  socket.on("message", (data) => {
+    const { sender, recipient, text } = data;
 
-  // On message
-  socket.on("message", ({ to, from, text }) => {
-    if (!messages[to]) messages[to] = [];
-    messages[to].push({ from, text });
+    if (!recipient || !text) return;
 
-    // Send to recipient
-    io.to(to).emit("message", { from, text });
+    // Save message
+    if (!chatHistory[recipient]) chatHistory[recipient] = [];
+    chatHistory[recipient].push({ from: sender, text });
 
-    // Also send to admins (for updates)
-    io.to("admins").emit("userUpdate", { userId: to, text });
+    const recipientSocketId = users[recipient];
+    if (recipientSocketId) {
+      io.to(recipientSocketId).emit("message", { sender, text });
+    }
+  });
+
+  socket.on("disconnect", () => {
+    if (userId && users[userId] === socket.id) {
+      delete users[userId];
+      console.log(`User disconnected: ${userId}`);
+    }
   });
 });
 
+// ===========================
+// REST API Endpoints for Admin Panel
+// ===========================
+
 app.get("/users", (req, res) => {
-  res.json(Object.keys(messages));
+  res.json(Object.keys(users));
 });
 
 app.get("/chat/:userId", (req, res) => {
-  res.json(messages[req.params.userId] || []);
+  const { userId } = req.params;
+  res.json(chatHistory[userId] || []);
 });
 
 app.post("/chat/:userId", (req, res) => {
-  const userId = req.params.userId;
+  const { userId } = req.params;
   const { text } = req.body;
-  if (!messages[userId]) messages[userId] = [];
-  messages[userId].push({ from: "admin", text });
-  io.to(userId).emit("message", { from: "admin", text });
-  res.sendStatus(200);
+
+  if (!text) return res.status(400).json({ error: "Text is required" });
+
+  const message = { from: "admin", text };
+
+  if (!chatHistory[userId]) chatHistory[userId] = [];
+  chatHistory[userId].push(message);
+
+  const recipientSocketId = users[userId];
+  if (recipientSocketId) {
+    io.to(recipientSocketId).emit("message", { sender: "admin", text });
+  }
+
+  res.json({ success: true });
 });
 
-server.listen(3000, "0.0.0.0", () => {
-  console.log("✅ Server listening on http://0.0.0.0:3000");
+// ===========================
+
+server.listen(3000, () => {
+  console.log("Server running at http://69.62.126.138:3000");
 });
