@@ -15,20 +15,23 @@ const io = new Server(server, {
   }
 });
 
-const users = {};             // { userId: socketId }
-const chatHistory = {};       // { userId: [{ from, text }] }
-const adminSockets = new Set();
+const users = {};        // userId => socketId
+const adminSockets = new Set(); // all connected admin socket IDs
+const chatHistory = {};  // userId => [ { from, text } ]
 
 io.on("connection", (socket) => {
   const userId = socket.handshake.query.userId;
 
   if (userId) {
+    // User connection
     users[userId] = socket.id;
     console.log(`User connected: ${userId}`);
+
     if (!chatHistory[userId]) chatHistory[userId] = [];
   } else {
-    console.log("Admin connected");
+    // Admin connection
     adminSockets.add(socket.id);
+    console.log("Admin connected");
   }
 
   socket.on("message", (data) => {
@@ -36,20 +39,23 @@ io.on("connection", (socket) => {
 
     if (!recipient || !text) return;
 
-    // Save message for recipient
+    // Save message in chat history for recipient
     if (!chatHistory[recipient]) chatHistory[recipient] = [];
     chatHistory[recipient].push({ from: sender, text });
 
-    // Send message to recipient if connected
-    const recipientSocketId = users[recipient];
-    if (recipientSocketId) {
-      io.to(recipientSocketId).emit("message", { sender, recipient, text });
+    // Send message to recipient socket(s)
+    if (recipient === "admin") {
+      // Send to all admins
+      adminSockets.forEach(adminSocketId => {
+        io.to(adminSocketId).emit("message", { sender, recipient, text });
+      });
+    } else {
+      // recipient is userId
+      const recipientSocketId = users[recipient];
+      if (recipientSocketId) {
+        io.to(recipientSocketId).emit("message", { sender, recipient, text });
+      }
     }
-
-    // Also send message to all admins
-    adminSockets.forEach(adminSocketId => {
-      io.to(adminSocketId).emit("message", { sender, recipient, text });
-    });
   });
 
   socket.on("disconnect", () => {
@@ -64,10 +70,7 @@ io.on("connection", (socket) => {
   });
 });
 
-// ===========================
-// REST API Endpoints for Admin Panel
-// ===========================
-
+// REST API for Admin Panel to get users and chat history
 app.get("/users", (req, res) => {
   res.json(Object.keys(users));
 });
@@ -93,15 +96,8 @@ app.post("/chat/:userId", (req, res) => {
     io.to(recipientSocketId).emit("message", { sender: "admin", recipient: userId, text });
   }
 
-  // Also notify all admins of this message (optional, but useful)
-  adminSockets.forEach(adminSocketId => {
-    io.to(adminSocketId).emit("message", { sender: "admin", recipient: userId, text });
-  });
-
   res.json({ success: true });
 });
-
-// ===========================
 
 server.listen(3000, () => {
   console.log("Server running at http://69.62.126.138:3000");
