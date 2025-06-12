@@ -60,31 +60,33 @@ io.on("connection", (socket) => {
   }
 
   socket.on("message", (data) => {
-    const { sender, recipient, text } = data;
-    if (!recipient || !text) return;
+  const { sender, recipient, text } = data;
+  if (!recipient || !text) return;
 
-    const target = sender === "admin" ? recipient : sender;
-    if (!chatHistory[target]) chatHistory[target] = [];
-    chatHistory[target].push({ sender, recipient, text });
-    saveHistory();
+  const userKey = sender === "admin" ? recipient : sender;
 
-    // Emit to all admins
-    if (recipient === "admin") {
-      adminSockets.forEach(adminSocketId => {
-        io.to(adminSocketId).emit("message", { sender, recipient, text });
-      });
-    } else {
-      const recipientSocketId = users[recipient];
-      if (recipientSocketId) {
-        io.to(recipientSocketId).emit("message", { sender, recipient, text });
-      }
+  if (!chatHistory[userKey]) chatHistory[userKey] = [];
+  chatHistory[userKey].push({ sender, recipient, text });
+  saveHistory();
 
-      // Also notify all admins of user message
-      adminSockets.forEach(adminSocketId => {
-        io.to(adminSocketId).emit("message", { sender, recipient, text });
-      });
+  // Emit to all admins
+  if (recipient === "admin") {
+    adminSockets.forEach(adminSocketId => {
+      io.to(adminSocketId).emit("message", { sender, recipient, text });
+    });
+  } else {
+    // Send to recipient user
+    const recipientSocketId = users[recipient];
+    if (recipientSocketId) {
+      io.to(recipientSocketId).emit("message", { sender, recipient, text });
     }
-  });
+
+    // Echo to admins as well
+    adminSockets.forEach(adminSocketId => {
+      io.to(adminSocketId).emit("message", { sender, recipient, text });
+    });
+  }
+});
 
   socket.on("disconnect", () => {
     if (userId && users[userId] === socket.id) {
