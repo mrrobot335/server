@@ -1,3 +1,4 @@
+// server.js
 const express = require("express");
 const http = require("http");
 const { Server } = require("socket.io");
@@ -16,7 +17,7 @@ const io = new Server(server, {
 });
 
 const users = {}; // userId => socketId
-const adminSockets = new Set(); // Set of admin socket IDs
+const adminSockets = new Set(); // all connected admin socket IDs
 const chatHistory = {}; // userId => [ { sender, recipient, text } ]
 
 io.on("connection", (socket) => {
@@ -34,37 +35,30 @@ io.on("connection", (socket) => {
     console.log("Admin connected");
   }
 
-  // Message handler
   socket.on("message", (data) => {
     const { sender, recipient, text } = data;
+
     if (!recipient || !text) return;
 
-    const userKey = sender === "admin" ? recipient : sender;
+    // Store message under the userId key (whether sender or recipient)
+    const key = sender === "admin" ? recipient : sender;
+    if (!chatHistory[key]) chatHistory[key] = [];
+    chatHistory[key].push({ sender, recipient, text });
 
-    if (!chatHistory[userKey]) chatHistory[userKey] = [];
-    chatHistory[userKey].push({ sender, recipient, text });
-
-    // Send message to recipient
     if (recipient === "admin") {
-      // Broadcast to all admins
-      adminSockets.forEach((adminSocketId) => {
+      // Send to all admins
+      adminSockets.forEach(adminSocketId => {
         io.to(adminSocketId).emit("message", { sender, recipient, text });
       });
     } else {
-      // Send to recipient user
+      // Send to user
       const recipientSocketId = users[recipient];
       if (recipientSocketId) {
         io.to(recipientSocketId).emit("message", { sender, recipient, text });
       }
-
-      // Also notify all admins of this message
-      adminSockets.forEach((adminSocketId) => {
-        io.to(adminSocketId).emit("message", { sender, recipient, text });
-      });
     }
   });
 
-  // Disconnect handling
   socket.on("disconnect", () => {
     if (userId && users[userId] === socket.id) {
       delete users[userId];
@@ -77,18 +71,18 @@ io.on("connection", (socket) => {
   });
 });
 
-// REST API — get all user IDs with active chat history
+// Return list of all known userIds with message history
 app.get("/users", (req, res) => {
   res.json(Object.keys(chatHistory));
 });
 
-// Get full chat history with a specific user
+// Get message history for a specific user
 app.get("/chat/:userId", (req, res) => {
   const { userId } = req.params;
   res.json(chatHistory[userId] || []);
 });
 
-// Admin sends a message to a user via HTTP
+// Send a message from admin to user and save it
 app.post("/chat/:userId", (req, res) => {
   const { userId } = req.params;
   const { text } = req.body;
@@ -105,14 +99,9 @@ app.post("/chat/:userId", (req, res) => {
     io.to(recipientSocketId).emit("message", message);
   }
 
-  // Also notify all admins
-  adminSockets.forEach((adminSocketId) => {
-    io.to(adminSocketId).emit("message", message);
-  });
-
   res.json({ success: true });
 });
 
 server.listen(3000, () => {
-  console.log("✅ Server running at http://69.62.126.138:3000");
+  console.log("Server running at http://69.62.126.138:3000");
 });
