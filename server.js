@@ -3,6 +3,8 @@ const express = require("express");
 const http = require("http");
 const { Server } = require("socket.io");
 const cors = require("cors");
+const fs = require("fs");
+const path = require("path");
 
 const app = express();
 app.use(cors());
@@ -18,7 +20,24 @@ const io = new Server(server, {
 
 const users = {}; // userId => socketId
 const adminSockets = new Set(); // all connected admin socket IDs
-const chatHistory = {}; // userId => [ { sender, recipient, text } ]
+let chatHistory = {}; // userId => [ { sender, recipient, text } ]
+const CHAT_HISTORY_FILE = path.join(__dirname, "chatHistory.json");
+
+// Load chat history from file
+if (fs.existsSync(CHAT_HISTORY_FILE)) {
+  try {
+    const data = fs.readFileSync(CHAT_HISTORY_FILE, "utf-8");
+    chatHistory = JSON.parse(data);
+  } catch (err) {
+    console.error("Error loading chat history from file:", err);
+  }
+}
+
+function saveChatHistory() {
+  fs.writeFile(CHAT_HISTORY_FILE, JSON.stringify(chatHistory, null, 2), (err) => {
+    if (err) console.error("Failed to save chat history:", err);
+  });
+}
 
 io.on("connection", (socket) => {
   const userId = socket.handshake.query.userId;
@@ -44,6 +63,7 @@ io.on("connection", (socket) => {
     const key = sender === "admin" ? recipient : sender;
     if (!chatHistory[key]) chatHistory[key] = [];
     chatHistory[key].push({ sender, recipient, text });
+    saveChatHistory();
 
     if (recipient === "admin") {
       // Send to all admins
@@ -93,6 +113,7 @@ app.post("/chat/:userId", (req, res) => {
 
   if (!chatHistory[userId]) chatHistory[userId] = [];
   chatHistory[userId].push(message);
+  saveChatHistory();
 
   const recipientSocketId = users[userId];
   if (recipientSocketId) {
