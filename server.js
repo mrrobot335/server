@@ -124,5 +124,5 @@ app.post("/chat/:userId", (req, res) => {
 });
 
 server.listen(3000, () => {
-  console.log("Server running at http://69.62.126.138:3000");
+  console.log("Server running at http://31.97.155.187:3000");
 });
